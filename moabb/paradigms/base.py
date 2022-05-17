@@ -1,10 +1,16 @@
 import logging
 from abc import ABCMeta, abstractmethod, abstractproperty
+from collections import OrderedDict
+from pathlib import Path
+import pickle
+import json
 
 import mne
 import numpy as np
 import pandas as pd
 
+from moabb.datasets import download as dl
+from moabb.analysis.results import get_digest
 
 log = logging.getLogger(__name__)
 
@@ -14,6 +20,35 @@ class BaseParadigm(metaclass=ABCMeta):
 
     def __init__(self):
         pass
+
+    @property
+    def param_names(self):
+        """
+        This property lists the parameter names of the Paradigm,
+        i.e. in theory, the arguments of __init__ method.
+        This property should be updated in subclasses if new arguments are added.
+        """
+        return []
+
+    def get_params(self):
+        """
+        Get parameters for this estimator.
+        Returns
+        -------
+        params : dict
+            Parameter names mapped to their values.
+        """
+        out = dict()
+        for key in self.param_names:
+            value = getattr(self, key)
+            out[key] = value
+        return out
+
+    def __repr__(self):
+        params = self.get_params()
+        # sort the parameters by name :
+        params = OrderedDict((k, v) for k, v in sorted(params.items()))
+        return f"{self.__class__.__name__}({', '.join(repr(k)+'='+repr(v) for k, v in params.items())})"
 
     @abstractproperty
     def scoring(self):
@@ -64,6 +99,24 @@ class BaseParadigm(metaclass=ABCMeta):
         """
         pass
 
+    def _epochs_to_array(self, epochs, dataset):
+        # rescale to work with uV
+        X = dataset.unit_factor * epochs.get_data()
+        k = len(self.filters)
+        if k > 1:
+            # if more than one band, return a 4D
+            if X.shape[0] % k != 0:
+                raise ValueError('Invalid number of epochs')
+            # XXX previously, using return_epochs=True and multiple bands was strangely implemented,
+            # XXX the epochs order was N*k*n
+            # XXX with k the number of bands, n the number of epochs per runs and N the total number of runs
+            # XXX it makes more sense to have N*n*k
+            k_n, c, t = X.shape
+            n = k_n // k
+            X = X.reshape(n, k, c, t).transpose((0, 2, 3, 1))
+            # otherwise return a 3D array
+        return X
+
     def process_raw(self, raw, dataset, return_epochs=False):  # noqa: C901
         """
         Process one raw data file.
@@ -92,6 +145,40 @@ class BaseParadigm(metaclass=ABCMeta):
             the data that will be used as features for the model
             Note: if return_epochs=True,  this is mne.Epochs
             if return_epochs=False, this is np.ndarray
+        labels: np.ndarray
+            the labels for training / evaluating the model
+        metadata: pd.DataFrame
+            A dataframe containing the metadata
+
+        """
+        epochs, labels, metadata = self.process_raw_to_epochs(raw, dataset)
+        if return_epochs:
+            return epochs, labels, metadata
+        return self._epochs_to_array(epochs), labels, metadata
+
+    def process_raw_to_epochs(self, raw, dataset):  # noqa: C901
+        """
+        Process one raw data file.
+
+        This function apply the preprocessing and eventual epoching on the
+        individual run, and return the data, labels and a dataframe with
+        metadata.
+
+        metadata is a dataframe with as many row as the length of the data
+        and labels.
+
+        Parameters
+        ----------
+        raw: mne.Raw instance
+            the raw EEG data.
+        dataset : dataset instance
+            The dataset corresponding to the raw file. mainly use to access
+            dataset specific information.
+
+        returns
+        -------
+        X : mne.Epochs
+            the data that will be used as features for the model
         labels: np.ndarray
             the labels for training / evaluating the model
         metadata: pd.DataFrame
@@ -173,28 +260,85 @@ class BaseParadigm(metaclass=ABCMeta):
                 epochs.crop(tmin=tmin, tmax=tmax)
             if self.resample is not None:
                 epochs = epochs.resample(self.resample)
-            # rescale to work with uV
-            if return_epochs:
-                X.append(epochs)
-            else:
-                X.append(dataset.unit_factor * epochs.get_data())
+            X.append(epochs)
 
         inv_events = {k: v for v, k in event_id.items()}
         labels = np.array([inv_events[e] for e in epochs.events[:, -1]])
-
-        if return_epochs:
-            X = mne.concatenate_epochs(X)
-        elif len(self.filters) == 1:
-            # if only one band, return a 3D array
-            X = X[0]
-        else:
-            # otherwise return a 4D
-            X = np.array(X).transpose((1, 2, 3, 0))
-
+        # here we change the order of the epochs so that multiple epochs objects can be easily concatenated
+        k = len(X) # number of bands
+        n = len(X[0]) # number of epochs in the run
+        X = mne.concatenate_epochs([X[k_i][n_i] for n_i in range(n) for k_i in range(k)])
         metadata = pd.DataFrame(index=range(len(labels)))
         return X, labels, metadata
 
-    def get_data(self, dataset, subjects=None, return_epochs=False):
+    def _get_preprocessed_sign(self, dataset):
+        return "PREPROCESSED_" + dataset.__class__.__name__.upper() + "_" + get_digest(self)
+
+    def preprocessed_path(self, dataset, path=None):
+        sign = self._get_preprocessed_sign(dataset)
+        path = dl.get_dataset_path(sign, path)
+        key_dest = "MNE-{:s}".format(sign.lower())
+        return str(Path(path) / key_dest)
+
+    def _find_preprocessed_data(self, dataset, subject):
+        path = self.preprocessed_path(dataset)
+        desc_file = Path(path) / str(subject) / "desc.json"
+        if not desc_file.is_file():
+            # if the data of this subject has not been pre-processed:
+            return None
+        with open(desc_file, "r") as f:
+            sessions = json.load(f)
+        return sessions
+
+    def load_processed_epochs(self, dataset, subject, session, run, preload=False):
+        """
+        TODO
+        """
+        path = self.preprocessed_path(dataset)
+        dir = (Path(path) / str(subject) / str(session) / str(run)).expanduser().resolve()
+        epochs = mne.read_epochs(str(dir/'epochs-epo.fif'), preload=preload)
+        with dir.joinpath("labels.pickle").open("rb") as f:
+            labels = pickle.load(f)
+        with dir.joinpath("metadata.pickle").open("rb") as f:
+            metadata = pickle.load(f)
+        return epochs, labels, metadata
+
+    def _save_preprocessed_epochs(self, proc, dataset, subject, session, run):
+        path = Path(self.preprocessed_path(dataset))
+        if not path.is_dir():
+            # create the main save directory if it does not exist
+            path.mkdir(parents=True)
+            # save the paradigm name and parameters
+            desc = dict(
+                paradigm_name=self.__class__.__name__,
+                dataset_name=dataset.__class__.__name__,
+                paradigm_params=self.get_params())
+            with path.joinpath("desc.json").open("w") as f:
+                json.dump(desc, f)
+        if proc is None:
+            return
+        epochs, labels, metadata = proc
+        dir = (path / str(subject) / str(session) / str(run)).expanduser()
+        if not dir.is_dir():
+            # create the run's directory if it does not exist
+            dir.mkdir(parents=True)
+        epochs.save(str(dir/'epochs-epo.fif'))
+        with dir.joinpath("labels.pickle").open("wb") as f:
+            pickle.dump(labels, f)
+        with dir.joinpath("metadata.pickle").open("wb") as f:
+            pickle.dump(metadata, f)
+
+    def _mark_as_saved(self, dataset, subject, sessions):
+        path = Path(self.preprocessed_path(dataset))
+        desc_file = Path(path) / str(subject) / "desc.json"
+        if not desc_file.parent.is_dir():
+            desc_file.parent.mkdir(parents=True)
+        sessions = {session : {run : None for run in runs.keys()} for session,runs in sessions.items()}
+        with open(desc_file, "w") as f:
+            json.dump(sessions, f)
+
+
+    def get_data(self, dataset, subjects=None, return_epochs=False, preload=False, use_preprocessed=True, save_preprocessed=True):
         """
         Return the data for a list of subject.
 
@@ -214,6 +358,11 @@ class BaseParadigm(metaclass=ABCMeta):
         return_epochs: boolean
             This flag specifies whether to return only the data array or the
             complete processed mne.Epochs
+        preload: boolean
+            This flag specifies whether the epochs must be pre-loaded in memory.
+            Only applied if you are using saved processed data and if return_epochs is True.
+        use_preprocessed: XXX
+        save_preprocessed: XXX
 
         returns
         -------
@@ -226,21 +375,29 @@ class BaseParadigm(metaclass=ABCMeta):
         metadata: pd.DataFrame
             A dataframe containing the metadata.
         """
-
         if not self.is_valid(dataset):
             message = "Dataset {} is not valid for paradigm".format(dataset.code)
             raise AssertionError(message)
 
-        data = dataset.get_data(subjects)
         self.prepare_process(dataset)
 
-        X = [] if return_epochs else np.array([])
+        X = []
         labels = []
         metadata = []
-        for subject, sessions in data.items():
+        for subject in subjects:
+            sessions = self._find_preprocessed_data(dataset, subject) if use_preprocessed else None
+            is_preprocessed = True
+            if sessions is None:
+                is_preprocessed = False
+                sessions = dataset._get_single_subject_data(subject)
             for session, runs in sessions.items():
-                for run, raw in runs.items():
-                    proc = self.process_raw(raw, dataset, return_epochs=return_epochs)
+                for run, raw_or_None in runs.items():
+                    if is_preprocessed:
+                        proc = self.load_processed_epochs(dataset, subject, session, run, preload=preload)
+                    else:
+                        proc = self.process_raw_to_epochs(raw_or_None, dataset)
+                        if save_preprocessed:
+                            self._save_preprocessed_epochs(proc, dataset, subject, session, run)
 
                     if proc is None:
                         # this mean the run did not contain any selected event
@@ -253,14 +410,12 @@ class BaseParadigm(metaclass=ABCMeta):
                     met["run"] = run
                     metadata.append(met)
 
-                    # grow X and labels in a memory efficient way. can be slow
-                    if return_epochs:
-                        X.append(x)
-                    else:
-                        X = np.append(X, x, axis=0) if len(X) else x
+                    X.append(x)
                     labels = np.append(labels, lbs, axis=0)
-
+            if save_preprocessed and not is_preprocessed:
+                self._mark_as_saved(dataset, subject, sessions)
         metadata = pd.concat(metadata, ignore_index=True)
-        if return_epochs:
-            X = mne.concatenate_epochs(X)
+        X = mne.concatenate_epochs(X)
+        if not return_epochs:
+            X = self._epochs_to_array(X, dataset)
         return X, labels, metadata

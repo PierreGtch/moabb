@@ -86,6 +86,15 @@ class BaseSSVEP(BaseParadigm):
         else:
             assert n_classes <= len(self.events), "More classes than events specified"
 
+    @property
+    def param_names(self):
+        """
+        This property lists the parameter names of the Paradigm,
+        i.e. in theory, the arguments of __init__ method.
+        This property should be updated in subclasses if new arguments are added.
+        """
+        return super().param_names + ["filters", "events", "n_classes", "tmin", "tmax", "baseline", "channels", "resample"]
+
     def is_valid(self, dataset):
         ret = True
         if not (dataset.paradigm == "ssvep"):

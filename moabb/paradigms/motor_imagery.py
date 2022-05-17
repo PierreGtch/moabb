@@ -77,6 +77,15 @@ class BaseMotorImagery(BaseParadigm):
         self.tmin = tmin
         self.tmax = tmax
 
+    @property
+    def param_names(self):
+        """
+        This property lists the parameter names of the Paradigm,
+        i.e. in theory, the arguments of __init__ method.
+        This property should be updated in subclasses if new arguments are added.
+        """
+        return super().param_names + ["filters", "events", "tmin", "tmax", "baseline", "channels", "resample"]
+
     def is_valid(self, dataset):
         ret = True
         if not (dataset.paradigm == "imagery"):
@@ -240,6 +249,15 @@ class FilterBankMotorImagery(FilterBank):
         else:
             assert n_classes <= len(self.events), "More classes than events specified"
 
+    @property
+    def param_names(self):
+        """
+        This property lists the parameter names of the Paradigm,
+        i.e. in theory, the arguments of __init__ method.
+        This property should be updated in subclasses if new arguments are added.
+        """
+        return super().param_names + ["n_classes",]
+
     def is_valid(self, dataset):
         ret = True
         if not dataset.paradigm == "imagery":
@@ -354,6 +372,15 @@ class MotorImagery(SinglePass):
             log.warning("Choosing from all possible events")
         else:
             assert n_classes <= len(self.events), "More classes than events specified"
+
+    @property
+    def param_names(self):
+        """
+        This property lists the parameter names of the Paradigm,
+        i.e. in theory, the arguments of __init__ method.
+        This property should be updated in subclasses if new arguments are added.
+        """
+        return super().param_names + ["n_classes",]
 
     def is_valid(self, dataset):
         ret = True
