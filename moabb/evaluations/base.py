@@ -57,6 +57,8 @@ class BaseEvaluation(ABC):
         additional_columns=None,
         return_epochs=False,
         mne_labels=False,
+        pre_fit_function=None,
+        post_fit_function=None,
     ):
         self.random_state = random_state
         self.n_jobs = n_jobs
@@ -64,6 +66,8 @@ class BaseEvaluation(ABC):
         self.hdf5_path = hdf5_path
         self.return_epochs = return_epochs
         self.mne_labels = mne_labels
+        self.pre_fit_function = pre_fit_function
+        self.post_fit_function = post_fit_function
 
         # check paradigm
         if not isinstance(paradigm, BaseParadigm):

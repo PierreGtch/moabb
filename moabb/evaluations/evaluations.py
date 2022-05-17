@@ -495,7 +495,12 @@ class CrossSubjectEvaluation(BaseEvaluation):
                 # iterate over pipelines
                 for name, clf in run_pipes.items():
                     t_start = time()
-                    model = deepcopy(clf).fit(X[train], y[train])
+                    model = deepcopy(clf)
+                    if self.pre_fit_function is not None:
+                        self.pre_fit_function(model, dataset, subject)
+                    model = model.fit(X[train], y[train])
+                    if self.post_fit_function is not None:
+                        self.post_fit_function(model, dataset, subject)
                     duration = time() - t_start
 
                     # we eval on each session
