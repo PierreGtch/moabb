@@ -378,6 +378,8 @@ class BaseParadigm(metaclass=ABCMeta):
         if not self.is_valid(dataset):
             message = "Dataset {} is not valid for paradigm".format(dataset.code)
             raise AssertionError(message)
+        if subjects is None:
+            subjects = dataset.subject_list
 
         self.prepare_process(dataset)
 
