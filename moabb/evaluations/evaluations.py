@@ -141,6 +141,8 @@ class WithinSessionEvaluation(BaseEvaluation):
                 ix = metadata.session == session
 
                 for name, clf in run_pipes.items():
+                    if self.pre_fit_function is not None:
+                        self.pre_fit_function(clf, dataset, subject)
                     t_start = time()
                     cv = StratifiedKFold(5, shuffle=True, random_state=self.random_state)
 
@@ -179,7 +181,8 @@ class WithinSessionEvaluation(BaseEvaluation):
                         "n_channels": nchan,
                         "pipeline": name,
                     }
-
+                    if self.post_fit_function is not None:
+                        self.post_fit_function(clf, dataset, subject)
                     yield res
 
     def get_data_size_subsets(self, y):
@@ -291,6 +294,9 @@ class WithinSessionEvaluation(BaseEvaluation):
                             else X_train.shape[1]
                         )
                         for name, clf in run_pipes.items():
+                            model = deepcopy(clf)
+                            if self.pre_fit_function is not None:
+                                self.pre_fit_function(model, dataset, subject)
                             res = {
                                 "dataset": dataset,
                                 "subject": subject,
@@ -307,8 +313,10 @@ class WithinSessionEvaluation(BaseEvaluation):
                                 res["score"] = np.nan
                             else:
                                 res["score"], res["time"] = self.score_explicit(
-                                    deepcopy(clf), X_train, y_train, X_test, y_test
+                                    model, X_train, y_train, X_test, y_test
                                 )
+                            if self.post_fit_function is not None:
+                                self.post_fit_function(model, dataset, subject)
                             yield res
 
     def evaluate(self, dataset, pipelines):
