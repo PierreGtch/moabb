@@ -266,8 +266,11 @@ class BaseParadigm(metaclass=ABCMeta):
         labels = np.array([inv_events[e] for e in epochs.events[:, -1]])
         # here we change the order of the epochs so that multiple epochs objects can be easily concatenated
         k = len(X) # number of bands
-        n = len(X[0]) # number of epochs in the run
-        X = mne.concatenate_epochs([X[k_i][n_i] for n_i in range(n) for k_i in range(k)])
+        if k > 1:
+            n = len(X[0]) # number of epochs in the run
+            X = mne.concatenate_epochs([X[k_i][n_i] for n_i in range(n) for k_i in range(k)])
+        else:
+            X = X[0]
         metadata = pd.DataFrame(index=range(len(labels)))
         return X, labels, metadata
 
@@ -338,7 +341,7 @@ class BaseParadigm(metaclass=ABCMeta):
             json.dump(sessions, f)
 
 
-    def get_data(self, dataset, subjects=None, return_epochs=False, preload=False, use_preprocessed=True, save_preprocessed=True):
+    def get_data(self, dataset, subjects=None, return_epochs=False, preload=False, use_preprocessed=True, save_preprocessed=True, concatenate=True):
         """
         Return the data for a list of subject.
 
@@ -361,8 +364,14 @@ class BaseParadigm(metaclass=ABCMeta):
         preload: boolean
             This flag specifies whether the epochs must be pre-loaded in memory.
             Only applied if you are using saved processed data and if return_epochs is True.
-        use_preprocessed: XXX
-        save_preprocessed: XXX
+        use_preprocessed: boolean
+            This flag specifies whether we should the eventually pre-processed dataset
+            that can be found on disk or not.
+        save_preprocessed: boolean
+            This flag specifies if, once the dataset is pre-processed, it should be saved on disk for later use.
+        concatenate: boolean
+            This flag specifies if the returned values should be concatenated
+            or not (i.e. one epoch per subject per session per run).
 
         returns
         -------
@@ -378,6 +387,10 @@ class BaseParadigm(metaclass=ABCMeta):
         if not self.is_valid(dataset):
             message = "Dataset {} is not valid for paradigm".format(dataset.code)
             raise AssertionError(message)
+        if not return_epochs and not concatenate:
+            raise NotImplementedError('concatenate=False is not compatible with return_epochs=False')
+        if not preload and concatenate:
+            log.warning("preload=False will be ignored with option concatenate=True")
         if subjects is None:
             subjects = dataset.subject_list
 
@@ -413,10 +426,13 @@ class BaseParadigm(metaclass=ABCMeta):
                     metadata.append(met)
 
                     X.append(x)
-                    labels = np.append(labels, lbs, axis=0)
+                    labels.append(lbs)
             if save_preprocessed and not is_preprocessed:
                 self._mark_as_saved(dataset, subject, sessions)
+        if not concatenate:
+            return X, labels, metadata
         metadata = pd.concat(metadata, ignore_index=True)
+        labels = np.concatenate(labels, axis=0)
         X = mne.concatenate_epochs(X)
         if not return_epochs:
             X = self._epochs_to_array(X, dataset)
