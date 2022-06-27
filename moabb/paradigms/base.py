@@ -293,17 +293,20 @@ class BaseParadigm(metaclass=ABCMeta):
             sessions = json.load(f)
         return sessions
 
-    def load_processed_epochs(self, dataset, subject, session, run, preload=False):
+    def load_processed_epochs(self, dataset, subject, session, run, preload=False, return_epochs_path=False):
         """
         TODO
         """
         path = self.preprocessed_path(dataset)
         dir = (Path(path) / str(subject) / str(session) / str(run)).expanduser().resolve()
-        epochs = mne.read_epochs(str(dir/'epochs-epo.fif'), preload=preload)
         with dir.joinpath("labels.pickle").open("rb") as f:
             labels = pickle.load(f)
         with dir.joinpath("metadata.pickle").open("rb") as f:
             metadata = pickle.load(f)
+        epochs_path = str(dir / 'epochs-epo.fif')
+        if return_epochs_path:
+            return epochs_path, labels, metadata
+        epochs = mne.read_epochs(epochs_path, preload=preload)
         return epochs, labels, metadata
 
     def _save_preprocessed_epochs(self, proc, dataset, subject, session, run):
@@ -341,7 +344,7 @@ class BaseParadigm(metaclass=ABCMeta):
             json.dump(sessions, f)
 
 
-    def get_data(self, dataset, subjects=None, return_epochs=False, preload=False, use_preprocessed=True, save_preprocessed=True, concatenate=True):
+    def get_data(self, dataset, subjects=None, return_epochs=False, preload=False, use_preprocessed=True, save_preprocessed=True, concatenate=True, return_epochs_paths=False):
         """
         Return the data for a list of subject.
 
@@ -372,6 +375,9 @@ class BaseParadigm(metaclass=ABCMeta):
         concatenate: boolean
             This flag specifies if the returned values should be concatenated
             or not (i.e. one epoch per subject per session per run).
+        return_epochs_paths: boolean
+            This flag specifies whether to return paths to processed mne.Epochs saved on disk.
+            If True, the flags return_epochs, preload, and save_preprocessed are ignored.
 
         returns
         -------
@@ -387,9 +393,11 @@ class BaseParadigm(metaclass=ABCMeta):
         if not self.is_valid(dataset):
             message = "Dataset {} is not valid for paradigm".format(dataset.code)
             raise AssertionError(message)
-        if not return_epochs and not concatenate:
+        if not return_epochs_paths and (not return_epochs and not concatenate):
             raise NotImplementedError('concatenate=False is not compatible with return_epochs=False')
-        if not preload and concatenate:
+        if return_epochs_paths and (concatenate or not use_preprocessed):
+            raise NotImplementedError('return_epochs_path=True is not compatible with concatenate=True or use_preprocessed=False')
+        if not return_epochs_paths and (not preload and concatenate):
             log.warning("preload=False will be ignored with option concatenate=True")
         if subjects is None:
             subjects = dataset.subject_list
@@ -408,7 +416,10 @@ class BaseParadigm(metaclass=ABCMeta):
             for session, runs in sessions.items():
                 for run, raw_or_None in runs.items():
                     if is_preprocessed:
-                        proc = self.load_processed_epochs(dataset, subject, session, run, preload=preload)
+                        proc = self.load_processed_epochs(dataset, subject, session, run, preload=preload, return_epochs_path=return_epochs_paths)
+                    elif return_epochs_paths:
+                        raise ValueError('You must first load the dataset with save_preprocessed=True '
+                                         'to save it before being able to use option return_epochs_paths=True.')
                     else:
                         proc = self.process_raw_to_epochs(raw_or_None, dataset)
                         if save_preprocessed:
