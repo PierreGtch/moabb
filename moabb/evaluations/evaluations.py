@@ -390,14 +390,14 @@ class WithinSessionEvaluation(BaseEvaluation):
                                 if isinstance(X_train, BaseEpochs)
                                 else X_train.shape[1]
                             )
-                            for name, clf in run_pipes.items():
+                            for name_pipe, clf in run_pipes.items():
                                 res = {
                                     "dataset": dataset,
                                     "subject": subject,
                                     "session": session,
                                     "n_samples": len(y_train),
                                     "n_channels": nchan,
-                                    "pipeline": name,
+                                    "pipeline": name_pipe,
                                     "transformer": name_tf,
                                     # Additional columns
                                     "data_size": len(subset_indices),

@@ -47,10 +47,15 @@ def get_digest(pipeline, transformer):
     If there are memory addresses, wipes them
     """
     if isinstance(transformer, _PlaceholderTransformer) or transformer is None:
-        obj = pipeline
+        string_rep = get_string_rep(pipeline)
     else:
-        obj = (transformer, pipeline)
-    return hashlib.md5(get_string_rep(obj)).hexdigest()
+        string_rep = repr(
+            [
+                ("transformer", get_string_rep(transformer)),
+                ("pipeline", get_string_rep(pipeline)),
+            ]
+        )
+    return hashlib.md5(string_rep).hexdigest()
 
 
 class Results:
@@ -288,3 +293,6 @@ class Results:
 class _PlaceholderTransformer:
     def transform(self, X):
         return X
+
+    def __repr__(self):
+        return "PlaceholderTransformer: THIS repr SHOULD NOT BE DISPLAYED OR APPEAR IN RESULTS"
