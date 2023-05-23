@@ -46,7 +46,7 @@ def get_digest(pipeline, transformer):
 
     If there are memory addresses, wipes them
     """
-    if isinstance(transformer, _PlaceholderTransformer) is transformer is None:
+    if isinstance(transformer, _PlaceholderTransformer) or transformer is None:
         obj = pipeline
     else:
         obj = (transformer, pipeline)
