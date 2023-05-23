@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 from mne import BaseEpochs
 from mne.io import BaseRaw
+from sklearn.preprocessing import FunctionTransformer
 
 from moabb.datasets.fake import FakeDataset
 from moabb.paradigms import (
@@ -64,6 +65,50 @@ class Test_MotorImagery(unittest.TestCase):
             return_epochs=True,
             return_raws=True,
         )
+
+    def test_BaseImagery_transform(self):
+        paradigm = SimpleMotorImagery()
+        paradigm_t = SimpleMotorImagery(transformer=FunctionTransformer(lambda X: X + 1))
+        subjects = [1]
+        dataset = FakeDataset(seed=12, paradigm="imagery")
+        X, _, _ = paradigm.get_data(dataset, subjects=subjects)
+        Xt, _, _ = paradigm_t.get_data(dataset, subjects=subjects)
+
+        # X and Xt must have the same shape
+        self.assertEqual(X.shape, Xt.shape)
+        # X and Xt-1 must contain the same values
+        self.assertIsNone(np.testing.assert_array_almost_equal(X, Xt - 1))
+
+    def test_BaseImagery_transform_raises(self):
+        subjects = [1]
+        dataset = FakeDataset(seed=12, paradigm="imagery")
+
+        # should raise error:
+        self.assertRaises(
+            AssertionError,
+            SimpleMotorImagery,
+            transformer=1,
+        )
+
+        class BadTransformer:
+            transform: 1
+
+        transformer = BadTransformer()
+        # should raise error:
+        self.assertRaises(
+            AssertionError,
+            SimpleMotorImagery,
+            transformer=transformer,
+        )
+
+        class OkishTransformer:
+            def transform(self, X):
+                raise ValueError
+
+        # should pass:
+        paradigm = SimpleMotorImagery(transformer=OkishTransformer())
+        # should raise another error:
+        self.assertRaises(ValueError, paradigm.get_data, dataset, subjects=subjects)
 
     def test_BaseImagery_channel_order(self):
         """test if paradigm return correct channel order, see issue #227"""
@@ -233,6 +278,54 @@ class Test_P300(unittest.TestCase):
             return_raws=True,
         )
 
+    def test_BaseP300_transform(self):
+        paradigm = SimpleP300()
+        paradigm_t = SimpleP300(transformer=FunctionTransformer(lambda X: X + 1))
+        subjects = [1]
+        dataset = FakeDataset(
+            seed=12, paradigm="p300", event_list=["Target", "NonTarget"]
+        )
+        X, _, _ = paradigm.get_data(dataset, subjects=subjects)
+        Xt, _, _ = paradigm_t.get_data(dataset, subjects=subjects)
+
+        # X and Xt must have the same shape
+        self.assertEqual(X.shape, Xt.shape)
+        # X and Xt-1 must contain the same values
+        self.assertIsNone(np.testing.assert_array_almost_equal(X, Xt - 1))
+
+    def test_BaseP300_transform_raises(self):
+        subjects = [1]
+        dataset = FakeDataset(
+            seed=12, paradigm="p300", event_list=["Target", "NonTarget"]
+        )
+
+        # should raise error:
+        self.assertRaises(
+            AssertionError,
+            SimpleP300,
+            transformer=1,
+        )
+
+        class BadTransformer:
+            transform: 1
+
+        transformer = BadTransformer()
+        # should raise error:
+        self.assertRaises(
+            AssertionError,
+            SimpleP300,
+            transformer=transformer,
+        )
+
+        class OkishTransformer:
+            def transform(self, X):
+                raise ValueError
+
+        # should pass:
+        paradigm = SimpleP300(transformer=OkishTransformer())
+        # should raise another error:
+        self.assertRaises(ValueError, paradigm.get_data, dataset, subjects=subjects)
+
     def test_BaseP300_channel_order(self):
         """test if paradigm return correct channel order, see issue #227"""
         datasetA = FakeDataset(
@@ -365,6 +458,50 @@ class Test_SSVEP(unittest.TestCase):
             return_epochs=True,
             return_raws=True,
         )
+
+    def test_BaseSSVEP_transform(self):
+        paradigm = BaseSSVEP()
+        paradigm_t = BaseSSVEP(transformer=FunctionTransformer(lambda X: X + 1))
+        subjects = [1]
+        dataset = FakeDataset(seed=12, paradigm="ssvep")
+        X, _, _ = paradigm.get_data(dataset, subjects=subjects)
+        Xt, _, _ = paradigm_t.get_data(dataset, subjects=subjects)
+
+        # X and Xt must have the same shape
+        self.assertEqual(X.shape, Xt.shape)
+        # X and Xt-1 must contain the same values
+        self.assertIsNone(np.testing.assert_array_almost_equal(X, Xt - 1))
+
+    def test_BaseP300_transform_raises(self):
+        subjects = [1]
+        dataset = FakeDataset(seed=12, paradigm="ssvep")
+
+        # should raise error:
+        self.assertRaises(
+            AssertionError,
+            BaseSSVEP,
+            transformer=1,
+        )
+
+        class BadTransformer:
+            transform: 1
+
+        transformer = BadTransformer()
+        # should raise error:
+        self.assertRaises(
+            AssertionError,
+            BaseSSVEP,
+            transformer=transformer,
+        )
+
+        class OkishTransformer:
+            def transform(self, X):
+                raise ValueError
+
+        # should pass:
+        paradigm = BaseSSVEP(transformer=OkishTransformer())
+        # should raise another error:
+        self.assertRaises(ValueError, paradigm.get_data, dataset, subjects=subjects)
 
     def test_BaseSSVEP_channel_order(self):
         """test if paradigm return correct channel order, see issue #227"""

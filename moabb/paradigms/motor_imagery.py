@@ -51,6 +51,13 @@ class BaseMotorImagery(BaseParadigm):
 
     resample: float | None (default None)
         If not None, resample the eeg data with the sampling rate provided.
+
+    transformer: sklearn.base.TransformerMixin | None (default None)
+        If not None, applies the transformer's transform method to the data
+        just before returning it. If get_data is called with
+        return_epochs=True or return_raws=True, epochs or raws will be passed
+        as input to the transform method; the output of the transform method is
+        always left unchanged.
     """
 
     def __init__(
@@ -62,6 +69,7 @@ class BaseMotorImagery(BaseParadigm):
         baseline=None,
         channels=None,
         resample=None,
+        transformer=None,
     ):
         super().__init__()
         self.filters = filters
@@ -70,10 +78,19 @@ class BaseMotorImagery(BaseParadigm):
         self.baseline = baseline
         self.resample = resample
 
+        if transformer is not None and not (
+            hasattr(transformer, "transform") and callable(transformer.transform)
+        ):
+            message = (
+                f"{transformer} is not a valid transformer "
+                + "(see https://scikit-learn.org/stable/glossary.html#term-transformer)"
+            )
+            raise AssertionError(message)
+        self.transformer = transformer
+
         if tmax is not None:
             if tmin >= tmax:
                 raise (ValueError("tmax must be greater than tmin"))
-
         self.tmin = tmin
         self.tmax = tmax
 

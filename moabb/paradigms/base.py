@@ -303,4 +303,6 @@ class BaseParadigm(metaclass=ABCMeta):
         metadata = pd.concat(metadata, ignore_index=True)
         if return_epochs:
             X = mne.concatenate_epochs(X)
+        if self.transformer is not None:
+            X = self.transformer.transform(X)
         return X, labels, metadata
