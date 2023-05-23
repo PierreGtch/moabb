@@ -4,6 +4,7 @@ import os.path as osp
 import re
 import warnings
 from datetime import datetime
+from itertools import product
 
 import h5py
 import numpy as np
@@ -40,11 +41,15 @@ def get_string_rep(obj):
     return str_no_addresses.replace("\n", "").encode("utf8")
 
 
-def get_digest(obj):
+def get_digest(pipeline, transformer):
     """Return hash of an object repr.
 
     If there are memory addresses, wipes them
     """
+    if isinstance(transformer, _PlaceholderTransformer) is transformer is None:
+        obj = pipeline
+    else:
+        obj = (transformer, pipeline)
     return hashlib.md5(get_string_rep(obj)).hexdigest()
 
 
@@ -64,6 +69,7 @@ class Results:
         evaluation_class,
         paradigm_class,
         suffix="",
+        pipeline_name_sep=" + ",
         overwrite=False,
         hdf5_path=None,
         additional_columns=None,
@@ -101,6 +107,7 @@ class Results:
 
         os.makedirs(osp.dirname(self.filepath), exist_ok=True)
         self.filepath = self.filepath
+        self.pipeline_name_sep = pipeline_name_sep
 
         if overwrite and osp.isfile(self.filepath):
             os.remove(self.filepath)
@@ -111,7 +118,7 @@ class Results:
                     "{:%Y-%m-%d, %H:%M}".format(datetime.now())
                 )
 
-    def add(self, results, pipelines):  # noqa: C901
+    def add(self, results, pipelines, transformers):  # noqa: C901
         """add results"""
 
         def to_list(res):
@@ -133,15 +140,25 @@ class Results:
             n_cols = 3
 
         with h5py.File(self.filepath, "r+") as f:
-            for name, data_dict in results.items():
-                digest = get_digest(pipelines[name])
+            for (name_tf, name_pipe), data_dict in results.items():
+                digest = get_digest(pipelines[name_pipe], transformers[name_tf])
                 if digest not in f.keys():
                     # create pipeline main group if nonexistant
                     f.create_group(digest)
 
                 ppline_grp = f[digest]
-                ppline_grp.attrs["name"] = name
-                ppline_grp.attrs["repr"] = repr(pipelines[name])
+                if transformers[name_tf] is None or isinstance(
+                    transformers[name_tf], _PlaceholderTransformer
+                ):
+                    ppline_grp.attrs["name"] = name_pipe
+                    ppline_grp.attrs["repr"] = repr(pipelines[name_pipe])
+                else:
+                    ppline_grp.attrs["name"] = (
+                        name_tf + self.pipeline_name_sep + name_pipe
+                    )
+                    ppline_grp.attrs["repr"] = repr(
+                        (transformers[name_tf], pipelines[name_pipe])
+                    )
 
                 dlist = to_list(data_dict)
                 d1 = dlist[0]  # FIXME: handle multiple session ?
@@ -193,13 +210,23 @@ class Results:
                         ]
                     )
 
-    def to_dataframe(self, pipelines=None):
+    def to_dataframe(self, pipelines=None, transformers=None):
         df_list = []
 
         # get the list of pipeline hash
         digests = []
         if pipelines is not None:
-            digests = [get_digest(pipelines[name]) for name in pipelines]
+            if transformers is None:
+                digests = [get_digest(pipeline, None) for pipeline in pipelines.values()]
+            else:
+                digests = [
+                    get_digest(pipeline, transformer)
+                    for pipeline, transformer in product(
+                        pipelines.values(), transformers.values()
+                    )
+                ]
+        elif transformers is not None:
+            raise ValueError("Transformers cannot be specified without pipelines.")
 
         with h5py.File(self.filepath, "r") as f:
             for digest, p_group in f.items():
@@ -221,22 +248,28 @@ class Results:
                     df_list.append(df)
         return pd.concat(df_list, ignore_index=True)
 
-    def not_yet_computed(self, pipelines, dataset, subj):
+    def not_yet_computed(self, pipelines, transformers, dataset, subj):
         """Check if a results has already been computed."""
-        ret = {
-            k: pipelines[k]
-            for k in pipelines.keys()
-            if not self._already_computed(pipelines[k], dataset, subj)
-        }
+        ret = {}
+        for name_t in transformers:
+            ret_t = {
+                name_p: pipelines[name_p]
+                for name_p in pipelines
+                if not self._already_computed(
+                    pipelines[name_p], transformers[name_t], dataset, subj
+                )
+            }
+            if len(ret_t) > 0:
+                ret[name_t] = (transformers[name_t], ret_t)
         return ret
 
-    def _already_computed(self, pipeline, dataset, subject, session=None):
+    def _already_computed(self, pipeline, transformer, dataset, subject, session=None):
         """Check if we have results for a current combination of pipeline
         / dataset / subject.
         """
         with h5py.File(self.filepath, "r") as f:
             # get the digest from repr
-            digest = get_digest(pipeline)
+            digest = get_digest(pipeline, transformer)
 
             # check if digest present
             if digest not in f.keys():
@@ -250,3 +283,8 @@ class Results:
                     # if dataset, check for subject
                     dset = pipe_grp[dataset.code]
                     return str(subject).encode("utf-8") in dset["id"][:, 0]
+
+
+class _PlaceholderTransformer:
+    def transform(self, X):
+        return X

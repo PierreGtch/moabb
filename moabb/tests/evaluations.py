@@ -13,6 +13,7 @@ from pyriemann.spatialfilters import CSP
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import FunctionTransformer
 
 from moabb.analysis.results import get_string_rep
 from moabb.datasets.fake import FakeDataset
@@ -27,9 +28,10 @@ try:
 except ImportError:
     _carbonfootprint = False
 
-
 pipelines = OrderedDict()
 pipelines["C"] = make_pipeline(Covariances("oas"), CSP(8), LDA())
+transformers = OrderedDict()
+transformers["T"] = FunctionTransformer(lambda X: X.take([0, 1, 2], axis=-1))
 dataset = FakeDataset(["left_hand", "right_hand"], n_subjects=2)
 if not osp.isdir(osp.join(osp.expanduser("~"), "mne_data")):
     os.makedirs(osp.join(osp.expanduser("~"), "mne_data"))
@@ -73,7 +75,17 @@ class Test_WithinSess(unittest.TestCase):
         # We should get 4 results, 2 sessions 2 subjects
         self.assertEqual(len(results), 4)
         # We should have 9 columns in the results data frame
-        self.assertEqual(len(results[0].keys()), 9 if _carbonfootprint else 8)
+        self.assertEqual(len(results[0].keys()), 10 if _carbonfootprint else 9)
+
+    def test_process_results_transformer(self):
+        results = self.eval.process(pipelines, param_grid=None, transformers=transformers)
+
+        # We should get 4 results, 2 sessions 2 subjects
+        self.assertEqual(len(results), 4)
+        self.assertTrue(all(results.pipeline == "T + C"))
+
+        results = self.eval.process(pipelines, param_grid=None, transformers=None)
+        self.assertTrue(all(results.pipeline == "C"))
 
     def test_eval_grid_search(self):
         gs_param = {
@@ -118,7 +130,7 @@ class Test_WithinSess(unittest.TestCase):
         # We should get 4 results, 2 sessions 2 subjects
         self.assertEqual(len(results), 4)
         # We should have 9 columns in the results data frame
-        self.assertEqual(len(results[0].keys()), 9 if _carbonfootprint else 8)
+        self.assertEqual(len(results[0].keys()), 10 if _carbonfootprint else 9)
         # We should check for selected parameters with joblib
         self.assertTrue(os.path.isfile(respath))
         res = joblib.load(respath)
@@ -164,9 +176,26 @@ class Test_WithinSessLearningCurve(unittest.TestCase):
             r for r in learning_curve_eval.evaluate(dataset, pipelines, param_grid=None)
         ]
         keys = results[0].keys()
-        self.assertEqual(len(keys), 10)  # 8 + 2 new for learning curve
+        self.assertEqual(len(keys), 11)  # 9 + 2 new for learning curve
         self.assertTrue("permutation" in keys)
         self.assertTrue("data_size" in keys)
+
+    def test_process_results_transformer(self):
+        learning_curve_eval = ev.WithinSessionEvaluation(
+            paradigm=FakeImageryParadigm(),
+            datasets=[dataset],
+            data_size={"policy": "ratio", "value": np.array([0.2, 0.5])},
+            n_perms=np.array([2, 2]),
+        )
+        results = learning_curve_eval.process(
+            pipelines, param_grid=None, transformers=transformers
+        )
+        self.assertTrue(all(results.pipeline == "T + C"))
+
+        results = learning_curve_eval.process(
+            pipelines, param_grid=None, transformers=None
+        )
+        self.assertTrue(all(results.pipeline == "C"))
 
     def test_all_policies_work(self):
         kwargs = dict(paradigm=FakeImageryParadigm(), datasets=[dataset], n_perms=[2, 2])

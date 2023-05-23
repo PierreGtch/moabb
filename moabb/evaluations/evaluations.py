@@ -30,7 +30,6 @@ try:
 except ImportError:
     _carbonfootprint = False
 
-
 log = logging.getLogger(__name__)
 
 # Numpy ArrayLike is only available starting from Numpy 1.20 and Python 3.8
@@ -172,94 +171,105 @@ class WithinSessionEvaluation(BaseEvaluation):
             return grid_clf
 
     # flake8: noqa: C901
-    def _evaluate(self, dataset, pipelines, param_grid):
+    def _evaluate(self, dataset, pipelines, param_grid, transformers):
         # Progress Bar at subject level
         for subject in tqdm(dataset.subject_list, desc=f"{dataset.code}-WithinSession"):
             # check if we already have result for this subject/pipeline
             # we might need a better granularity, if we query the DB
-            run_pipes = self.results.not_yet_computed(pipelines, dataset, subject)
-            if len(run_pipes) == 0:
+            run_tf = self.results.not_yet_computed(
+                pipelines, transformers, dataset, subject
+            )
+            if len(run_tf) == 0:
                 continue
 
             # get the data
             X, y, metadata = self.paradigm.get_data(
                 dataset, [subject], self.return_epochs, self.return_raws
             )
+            for name_tf, (transformer, run_pipes) in run_tf.items():
+                X = transformer.transform(X)
 
-            # iterate over sessions
-            for session in np.unique(metadata.session):
-                ix = metadata.session == session
+                # iterate over sessions
+                for session in np.unique(metadata.session):
+                    ix = metadata.session == session
 
-                for name, clf in run_pipes.items():
-                    if _carbonfootprint:
-                        # Initialize CodeCarbon
-                        tracker = EmissionsTracker(save_to_file=False, log_level="error")
-                        tracker.start()
-                    t_start = time()
-                    cv = StratifiedKFold(5, shuffle=True, random_state=self.random_state)
-                    scorer = get_scorer(self.paradigm.scoring)
-                    le = LabelEncoder()
-                    y_cv = le.fit_transform(y[ix])
-                    X_ = X[ix]
-                    y_ = y[ix] if self.mne_labels else y_cv
-
-                    grid_clf = clone(clf)
-
-                    name_grid = os.path.join(
-                        str(self.hdf5_path),
-                        "GridSearch_WithinSession",
-                        dataset.code,
-                        "subject" + str(subject),
-                        str(session),
-                        str(name),
-                    )
-
-                    # Implement Grid Search
-                    grid_clf = self._grid_search(
-                        param_grid, name_grid, name, grid_clf, X_, y_, cv
-                    )
-
-                    if isinstance(X, BaseEpochs):
+                    for name, clf in run_pipes.items():
+                        if _carbonfootprint:
+                            # Initialize CodeCarbon
+                            tracker = EmissionsTracker(
+                                save_to_file=False, log_level="error"
+                            )
+                            tracker.start()
+                        t_start = time()
+                        cv = StratifiedKFold(
+                            5, shuffle=True, random_state=self.random_state
+                        )
                         scorer = get_scorer(self.paradigm.scoring)
-                        acc = list()
+                        le = LabelEncoder()
+                        y_cv = le.fit_transform(y[ix])
                         X_ = X[ix]
                         y_ = y[ix] if self.mne_labels else y_cv
-                        for train, test in cv.split(X_, y_):
-                            cvclf = clone(grid_clf)
-                            cvclf.fit(X_[train], y_[train])
-                            acc.append(scorer(cvclf, X_[test], y_[test]))
-                        acc = np.array(acc)
-                    else:
-                        acc = cross_val_score(
-                            grid_clf,
-                            X[ix],
-                            y_cv,
-                            cv=cv,
-                            scoring=self.paradigm.scoring,
-                            n_jobs=self.n_jobs,
-                            error_score=self.error_score,
-                        )
-                    score = acc.mean()
-                    if _carbonfootprint:
-                        emissions = tracker.stop()
-                        if emissions is None:
-                            emissions = np.NaN
-                    duration = time() - t_start
-                    nchan = X.info["nchan"] if isinstance(X, BaseEpochs) else X.shape[1]
-                    res = {
-                        "time": duration / 5.0,  # 5 fold CV
-                        "dataset": dataset,
-                        "subject": subject,
-                        "session": session,
-                        "score": score,
-                        "n_samples": len(y_cv),  # not training sample
-                        "n_channels": nchan,
-                        "pipeline": name,
-                    }
-                    if _carbonfootprint:
-                        res["carbon_emission"] = (1000 * emissions,)
 
-                    yield res
+                        grid_clf = clone(clf)
+
+                        name_grid = os.path.join(
+                            str(self.hdf5_path),
+                            "GridSearch_WithinSession",
+                            dataset.code,
+                            "subject" + str(subject),
+                            str(session),
+                            str(name),
+                        )
+
+                        # Implement Grid Search
+                        grid_clf = self._grid_search(
+                            param_grid, name_grid, name, grid_clf, X_, y_, cv
+                        )
+
+                        if isinstance(X, BaseEpochs):
+                            scorer = get_scorer(self.paradigm.scoring)
+                            acc = list()
+                            X_ = X[ix]
+                            y_ = y[ix] if self.mne_labels else y_cv
+                            for train, test in cv.split(X_, y_):
+                                cvclf = clone(grid_clf)
+                                cvclf.fit(X_[train], y_[train])
+                                acc.append(scorer(cvclf, X_[test], y_[test]))
+                            acc = np.array(acc)
+                        else:
+                            acc = cross_val_score(
+                                grid_clf,
+                                X[ix],
+                                y_cv,
+                                cv=cv,
+                                scoring=self.paradigm.scoring,
+                                n_jobs=self.n_jobs,
+                                error_score=self.error_score,
+                            )
+                        score = acc.mean()
+                        if _carbonfootprint:
+                            emissions = tracker.stop()
+                            if emissions is None:
+                                emissions = np.NaN
+                        duration = time() - t_start
+                        nchan = (
+                            X.info["nchan"] if isinstance(X, BaseEpochs) else X.shape[1]
+                        )
+                        res = {
+                            "time": duration / 5.0,  # 5 fold CV
+                            "dataset": dataset,
+                            "subject": subject,
+                            "session": session,
+                            "score": score,
+                            "n_samples": len(y_cv),  # not training sample
+                            "n_channels": nchan,
+                            "pipeline": name,
+                            "transformer": name_tf,
+                        }
+                        if _carbonfootprint:
+                            res["carbon_emission"] = (1000 * emissions,)
+
+                        yield res
 
     def get_data_size_subsets(self, y):
         if self.data_size is None:
@@ -315,13 +325,15 @@ class WithinSessionEvaluation(BaseEvaluation):
         duration = time() - t_start
         return score, duration
 
-    def _evaluate_learning_curve(self, dataset, pipelines):
+    def _evaluate_learning_curve(self, dataset, pipelines, transformers):
         # Progressbar at subject level
         for subject in tqdm(dataset.subject_list, desc=f"{dataset.code}-WithinSession"):
             # check if we already have result for this subject/pipeline
             # we might need a better granularity, if we query the DB
-            run_pipes = self.results.not_yet_computed(pipelines, dataset, subject)
-            if len(run_pipes) == 0:
+            run_tf = self.results.not_yet_computed(
+                pipelines, transformers, dataset, subject
+            )
+            if len(run_tf) == 0:
                 continue
 
             # get the data
@@ -331,73 +343,82 @@ class WithinSessionEvaluation(BaseEvaluation):
                 return_epochs=self.return_epochs,
                 return_raws=self.return_raws,
             )
-            # shuffle_data = True if self.n_perms > 1 else False
-            for session in np.unique(metadata_all.session):
-                sess_idx = metadata_all.session == session
-                X_sess = X_all[sess_idx]
-                y_sess = y_all[sess_idx]
-                # metadata_sess = metadata_all[sess_idx]
-                sss = StratifiedShuffleSplit(
-                    n_splits=self.n_perms[0], test_size=self.test_size
-                )
-                for perm_i, (train_idx, test_idx) in enumerate(sss.split(X_sess, y_sess)):
-                    X_train_all = X_sess[train_idx]
-                    y_train_all = y_sess[train_idx]
-                    X_test = X_sess[test_idx]
-                    y_test = y_sess[test_idx]
-                    data_size_steps = self.get_data_size_subsets(y_train_all)
-                    for di, subset_indices in enumerate(data_size_steps):
-                        if perm_i >= self.n_perms[di]:
-                            continue
-                        not_enough_data = False
-                        log.info(
-                            f"Permutation: {perm_i+1},"
-                            f" Training samples: {len(subset_indices)}"
-                        )
+            for name_tf, (transformer, run_pipes) in run_tf.items():
+                X_all = transformer.transform(X_all)
 
-                        if self.return_epochs:
-                            X_train = X_train_all[subset_indices]
-                        else:
-                            X_train = X_train_all[subset_indices, :]
-                        y_train = y_train_all[subset_indices]
-                        # metadata = metadata_perm[:subset_indices]
-
-                        if len(np.unique(y_train)) < 2:
-                            log.warning(
-                                "For current data size, only one class" "would remain."
+                # shuffle_data = True if self.n_perms > 1 else False
+                for session in np.unique(metadata_all.session):
+                    sess_idx = metadata_all.session == session
+                    X_sess = X_all[sess_idx]
+                    y_sess = y_all[sess_idx]
+                    # metadata_sess = metadata_all[sess_idx]
+                    sss = StratifiedShuffleSplit(
+                        n_splits=self.n_perms[0], test_size=self.test_size
+                    )
+                    for perm_i, (train_idx, test_idx) in enumerate(
+                        sss.split(X_sess, y_sess)
+                    ):
+                        X_train_all = X_sess[train_idx]
+                        y_train_all = y_sess[train_idx]
+                        X_test = X_sess[test_idx]
+                        y_test = y_sess[test_idx]
+                        data_size_steps = self.get_data_size_subsets(y_train_all)
+                        for di, subset_indices in enumerate(data_size_steps):
+                            if perm_i >= self.n_perms[di]:
+                                continue
+                            not_enough_data = False
+                            log.info(
+                                f"Permutation: {perm_i + 1},"
+                                f" Training samples: {len(subset_indices)}"
                             )
-                            not_enough_data = True
-                        nchan = (
-                            X_train.info["nchan"]
-                            if isinstance(X_train, BaseEpochs)
-                            else X_train.shape[1]
-                        )
-                        for name, clf in run_pipes.items():
-                            res = {
-                                "dataset": dataset,
-                                "subject": subject,
-                                "session": session,
-                                "n_samples": len(y_train),
-                                "n_channels": nchan,
-                                "pipeline": name,
-                                # Additional columns
-                                "data_size": len(subset_indices),
-                                "permutation": perm_i + 1,
-                            }
-                            if not_enough_data:
-                                res["time"] = 0
-                                res["score"] = np.nan
-                            else:
-                                res["score"], res["time"] = self.score_explicit(
-                                    deepcopy(clf), X_train, y_train, X_test, y_test
-                                )
-                            yield res
 
-    def evaluate(self, dataset, pipelines, param_grid):
+                            if self.return_epochs:
+                                X_train = X_train_all[subset_indices]
+                            else:
+                                X_train = X_train_all[subset_indices, :]
+                            y_train = y_train_all[subset_indices]
+                            # metadata = metadata_perm[:subset_indices]
+
+                            if len(np.unique(y_train)) < 2:
+                                log.warning(
+                                    "For current data size, only one class"
+                                    "would remain."
+                                )
+                                not_enough_data = True
+                            nchan = (
+                                X_train.info["nchan"]
+                                if isinstance(X_train, BaseEpochs)
+                                else X_train.shape[1]
+                            )
+                            for name, clf in run_pipes.items():
+                                res = {
+                                    "dataset": dataset,
+                                    "subject": subject,
+                                    "session": session,
+                                    "n_samples": len(y_train),
+                                    "n_channels": nchan,
+                                    "pipeline": name,
+                                    "transformer": name_tf,
+                                    # Additional columns
+                                    "data_size": len(subset_indices),
+                                    "permutation": perm_i + 1,
+                                }
+                                if not_enough_data:
+                                    res["time"] = 0
+                                    res["score"] = np.nan
+                                else:
+                                    res["score"], res["time"] = self.score_explicit(
+                                        deepcopy(clf), X_train, y_train, X_test, y_test
+                                    )
+                                yield res
+
+    def evaluate(self, dataset, pipelines, param_grid, transformers=None):
+        if transformers is None:
+            transformers = self._get_default_transformers()
         if self.calculate_learning_curve:
-            yield from self._evaluate_learning_curve(dataset, pipelines)
+            yield from self._evaluate_learning_curve(dataset, pipelines, transformers)
         else:
-            yield from self._evaluate(dataset, pipelines, param_grid)
+            yield from self._evaluate(dataset, pipelines, param_grid, transformers)
 
     def is_valid(self, dataset):
         return True
@@ -476,7 +497,11 @@ class CrossSessionEvaluation(BaseEvaluation):
             return grid_clf
 
     # flake8: noqa: C901
-    def evaluate(self, dataset, pipelines, param_grid):
+    def evaluate(self, dataset, pipelines, param_grid, transformers=None):
+        if transformers is None:
+            transformers = self._get_default_transformers()
+        else:
+            raise NotImplementedError
         if not self.is_valid(dataset):
             raise AssertionError("Dataset is not appropriate for evaluation")
         # Progressbar at subject level
@@ -650,7 +675,11 @@ class CrossSubjectEvaluation(BaseEvaluation):
             return pipelines[name]
 
     # flake8: noqa: C901
-    def evaluate(self, dataset, pipelines, param_grid):
+    def evaluate(self, dataset, pipelines, param_grid, transformers=None):
+        if transformers is None:
+            transformers = self._get_default_transformers()
+        else:
+            raise NotImplementedError
         if not self.is_valid(dataset):
             raise AssertionError("Dataset is not appropriate for evaluation")
         # this is a bit akward, but we need to check if at least one pipe

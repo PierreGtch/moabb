@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from sklearn.base import BaseEstimator
 
 from moabb.analysis import Results
+from moabb.analysis.results import _PlaceholderTransformer
 from moabb.datasets.base import BaseDataset
 from moabb.paradigms.base import BaseParadigm
 
@@ -34,6 +35,8 @@ class BaseEvaluation(ABC):
         ‘raise’, the error is raised.
     suffix: str
         Suffix for the results file.
+    pipeline_name_sep: str
+        Separator used when concatenating a transformer name and a pipeline name in the results.
     hdf5_path: str
         Specific path for storing the results.
     additional_columns: None
@@ -55,6 +58,7 @@ class BaseEvaluation(ABC):
         overwrite=False,
         error_score="raise",
         suffix="",
+        pipeline_name_sep=" + ",
         hdf5_path=None,
         additional_columns=None,
         return_epochs=False,
@@ -64,6 +68,7 @@ class BaseEvaluation(ABC):
         self.random_state = random_state
         self.n_jobs = n_jobs
         self.error_score = error_score
+        self.pipeline_name_sep = pipeline_name_sep
         self.hdf5_path = hdf5_path
         self.return_epochs = return_epochs
         self.return_raws = return_raws
@@ -122,11 +127,12 @@ class BaseEvaluation(ABC):
             type(self.paradigm),
             overwrite=overwrite,
             suffix=suffix,
+            pipeline_name_sep=pipeline_name_sep,
             hdf5_path=self.hdf5_path,
             additional_columns=additional_columns,
         )
 
-    def process(self, pipelines, param_grid=None):
+    def process(self, pipelines, param_grid=None, transformers=None):
         """Runs all pipelines on all datasets.
 
         This function will apply all provided pipelines and return a dataframe
@@ -138,6 +144,12 @@ class BaseEvaluation(ABC):
             A dict containing the sklearn pipeline to evaluate.
         param_grid : dict of str
             The key of the dictionary must be the same as the associated pipeline.
+        transformers : dict of transformer instance.
+            An optional dict containing fixed sklearn transformers to apply preprocessing
+            before calling the pipelines.
+            All transformers will be pared with all pipelines.
+            The transformers will NOT be trained (i.e. no call to fit), they are supposed to
+            apply fixed preprocessing to the data.
 
         Returns
         -------
@@ -154,28 +166,51 @@ class BaseEvaluation(ABC):
             if not (isinstance(pipeline, BaseEstimator)):
                 raise (ValueError("pipelines must only contains Pipelines " "instance"))
 
+        # check transformers
+        if transformers is None:
+            transformers = self._get_default_transformers()
+        else:
+            if not isinstance(transformers, dict):
+                raise (ValueError("transformers must be a dict or None"))
+
+            for _, transformer in transformers.items():
+                if not (
+                    hasattr(transformer, "transform") and callable(transformer.transform)
+                ):
+                    raise ValueError(
+                        "transformers must only contain objects with a transform method "
+                        + "(see https://scikit-learn.org/stable/glossary.html#term-transformer)"
+                    )
+
         for dataset in self.datasets:
             log.info("Processing dataset: {}".format(dataset.code))
-            results = self.evaluate(dataset, pipelines, param_grid)
+            results = self.evaluate(dataset, pipelines, param_grid, transformers)
             for res in results:
-                self.push_result(res, pipelines)
+                self.push_result(res, pipelines, transformers)
 
-        return self.results.to_dataframe(pipelines=pipelines)
+        return self.results.to_dataframe(pipelines=pipelines, transformers=transformers)
 
-    def push_result(self, res, pipelines):
-        message = "{} | ".format(res["pipeline"])
+    def push_result(self, res, pipelines, transformers):
+        pipeline_name = res["pipeline"]
+        if res["transformer"] != _PlaceholderTransformer.__name__:
+            pipeline_name = res["transformer"] + self.pipeline_name_sep + pipeline_name
+        message = "{} | ".format(pipeline_name)
         message += "{} | {} | {}".format(
             res["dataset"].code, res["subject"], res["session"]
         )
         message += ": Score %.3f" % res["score"]
         log.info(message)
-        self.results.add({res["pipeline"]: res}, pipelines=pipelines)
+        self.results.add(
+            {(res["transformer"], res["pipeline"]): res},
+            pipelines=pipelines,
+            transformers=transformers,
+        )
 
     def get_results(self):
         return self.results.to_dataframe()
 
     @abstractmethod
-    def evaluate(self, dataset, pipelines, param_grid):
+    def evaluate(self, dataset, pipelines, param_grid, transformers=None):
         """Evaluate results on a single dataset.
 
         This method return a generator. each results item is a dict with
@@ -188,7 +223,9 @@ class BaseEvaluation(ABC):
                    'score': score,
                    'n_samples': number of training examples,
                    'n_channels': number of channel,
-                   'pipeline': pipeline name}
+                   'pipeline': pipeline name,
+                   'transformer': transformer name,
+                   }
         """
         pass
 
@@ -209,3 +246,9 @@ class BaseEvaluation(ABC):
             The dataset to verify.
 
         """
+
+    @staticmethod
+    def _get_default_transformers():
+        return {
+            _PlaceholderTransformer.__name__: _PlaceholderTransformer(),
+        }
