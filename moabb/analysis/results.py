@@ -49,11 +49,8 @@ def get_digest(pipeline, transformer):
     if isinstance(transformer, _PlaceholderTransformer) or transformer is None:
         string_rep = get_string_rep(pipeline)
     else:
-        string_rep = repr(
-            [
-                ("transformer", get_string_rep(transformer)),
-                ("pipeline", get_string_rep(pipeline)),
-            ]
+        string_rep = get_string_rep(
+            (get_string_rep(transformer), get_string_rep(pipeline))
         )
     return hashlib.md5(string_rep).hexdigest()
 
