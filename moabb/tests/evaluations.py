@@ -4,6 +4,7 @@ import platform
 import unittest
 import warnings
 from collections import OrderedDict
+from operator import methodcaller
 
 import joblib
 import numpy as np
@@ -31,7 +32,8 @@ except ImportError:
 pipelines = OrderedDict()
 pipelines["C"] = make_pipeline(Covariances("oas"), CSP(8), LDA())
 transformers = OrderedDict()
-transformers["T"] = FunctionTransformer(lambda X: X.take([0, 1, 2], axis=-1))
+transformers["T1"] = FunctionTransformer(methodcaller("take", [0, 1, 2], axis=-1))
+transformers["T2"] = FunctionTransformer(methodcaller("take", [0, 1, 2, 4], axis=-1))
 dataset = FakeDataset(["left_hand", "right_hand"], n_subjects=2)
 if not osp.isdir(osp.join(osp.expanduser("~"), "mne_data")):
     os.makedirs(osp.join(osp.expanduser("~"), "mne_data"))
@@ -80,12 +82,16 @@ class Test_WithinSess(unittest.TestCase):
     def test_process_results_transformer(self):
         results = self.eval.process(pipelines, param_grid=None, transformers=transformers)
 
-        # We should get 4 results, 2 sessions 2 subjects
-        self.assertEqual(len(results), 4)
-        self.assertTrue(all(results.pipeline == "T + C"))
+        # We should get 8 results, 2 sessions 2 subjects, 2 transformers
+        self.assertEqual(len(results), 8)
+        print(results)
+        print(results.session)
+        print(results.columns)
+        self.assertEqual((results.pipeline == "T1 + C").sum(), 4)
+        self.assertEqual((results.pipeline == "T2 + C").sum(), 4)
 
         results = self.eval.process(pipelines, param_grid=None, transformers=None)
-        self.assertTrue(all(results.pipeline == "C"))
+        self.assertEqual((results.pipeline == "C").sum(), 4)
 
     def test_eval_grid_search(self):
         gs_param = {
@@ -190,12 +196,15 @@ class Test_WithinSessLearningCurve(unittest.TestCase):
         results = learning_curve_eval.process(
             pipelines, param_grid=None, transformers=transformers
         )
-        self.assertTrue(all(results.pipeline == "T + C"))
+        # We should get 32 results, 2 sessions 2 subjects, 2 data_sizes, 2 permutations, 2 transformers
+        self.assertEqual((results.pipeline == "T1 + C").sum(), 16)
+        self.assertEqual((results.pipeline == "T2 + C").sum(), 16)
 
         results = learning_curve_eval.process(
             pipelines, param_grid=None, transformers=None
         )
-        self.assertTrue(all(results.pipeline == "C"))
+        # We should get 16 results, 2 sessions 2 subjects, 2 data_sizes, 2 permutations
+        self.assertEqual((results.pipeline == "C").sum(), 16)
 
     def test_all_policies_work(self):
         kwargs = dict(paradigm=FakeImageryParadigm(), datasets=[dataset], n_perms=[2, 2])
