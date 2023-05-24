@@ -183,11 +183,11 @@ class WithinSessionEvaluation(BaseEvaluation):
                 continue
 
             # get the data
-            X, y, metadata = self.paradigm.get_data(
+            X_no_tf, y, metadata = self.paradigm.get_data(
                 dataset, [subject], self.return_epochs, self.return_raws
             )
             for name_tf, (transformer, run_pipes) in run_tf.items():
-                X = transformer.transform(X)
+                X = transformer.transform(X_no_tf)
 
                 # iterate over sessions
                 for session in np.unique(metadata.session):
@@ -337,14 +337,14 @@ class WithinSessionEvaluation(BaseEvaluation):
                 continue
 
             # get the data
-            X_all, y_all, metadata_all = self.paradigm.get_data(
+            X_all_no_tf, y_all, metadata_all = self.paradigm.get_data(
                 dataset=dataset,
                 subjects=[subject],
                 return_epochs=self.return_epochs,
                 return_raws=self.return_raws,
             )
             for name_tf, (transformer, run_pipes) in run_tf.items():
-                X_all = transformer.transform(X_all)
+                X_all = transformer.transform(X_all_no_tf)
 
                 # shuffle_data = True if self.n_perms > 1 else False
                 for session in np.unique(metadata_all.session):
