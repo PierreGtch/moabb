@@ -84,9 +84,6 @@ class Test_WithinSess(unittest.TestCase):
 
         # We should get 8 results, 2 sessions 2 subjects, 2 transformers
         self.assertEqual(len(results), 8)
-        print(results)
-        print(results.session)
-        print(results.columns)
         self.assertEqual((results.pipeline == "T1 + C").sum(), 4)
         self.assertEqual((results.pipeline == "T2 + C").sum(), 4)
 
