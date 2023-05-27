@@ -272,6 +272,7 @@ class WithinSessionEvaluation(BaseEvaluation):
                         yield res
 
     def get_data_size_subsets(self, y, dataset_code, subject, session):
+        self._warned_not_enough = []
         if self.data_size is None:
             raise ValueError(
                 "Cannot create data subsets without valid policy for data_size."
@@ -294,11 +295,14 @@ class WithinSessionEvaluation(BaseEvaluation):
             indices = []
             for ds in self.data_size["value"]:
                 if ds > n_smallest_class:
-                    log.warning(
-                        f"Dataset {dataset_code}, subject {subject}, session {session}: "
-                        f"Smallest class has {n_smallest_class} samples. "
-                        f"Desired samples per class {ds} is too large.",
-                    )
+                    t = (dataset_code, subject, session, ds)
+                    if t not in self._warned_not_enough:
+                        self._warned_not_enough.append(t)
+                        log.warning(
+                            f"Dataset '{dataset_code}', subject {subject}, session '{session}': "
+                            f"Smallest class has {n_smallest_class} samples. "
+                            f"Desired samples per class {ds} is too large.",
+                        )
                     indices.append(None)
                     continue
                 indices.append(
