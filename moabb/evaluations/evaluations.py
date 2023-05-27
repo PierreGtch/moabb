@@ -297,7 +297,7 @@ class WithinSessionEvaluation(BaseEvaluation):
                     log.warning(
                         f"Dataset {dataset_code}, subject {subject}, session {session}: "
                         f"Smallest class has {n_smallest_class} samples. "
-                        f"Desired samples per class {ds} is too large."
+                        f"Desired samples per class {ds} is too large.",
                     )
                     indices.append(None)
                     continue

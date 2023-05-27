@@ -233,9 +233,10 @@ class Test_WithinSessLearningCurve(unittest.TestCase):
         )
         # This one should run
         run_evaluation(should_work, dataset, pipelines)
-        self.assertRaises(
-            ValueError, run_evaluation, too_many_samples, dataset, pipelines
-        )
+        # this one should log a warning
+        with self.assertLogs(level="WARNING") as log:
+            run_evaluation(too_many_samples, dataset, pipelines)
+            self.assertIn("Smallest class has", log.output[0])
 
     def test_eval_grid_search(self):
         pass
