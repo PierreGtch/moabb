@@ -271,7 +271,7 @@ class WithinSessionEvaluation(BaseEvaluation):
 
                         yield res
 
-    def get_data_size_subsets(self, y):
+    def get_data_size_subsets(self, y, dataset_code, subject, session):
         if self.data_size is None:
             raise ValueError(
                 "Cannot create data subsets without valid policy for data_size."
@@ -294,10 +294,12 @@ class WithinSessionEvaluation(BaseEvaluation):
             indices = []
             for ds in self.data_size["value"]:
                 if ds > n_smallest_class:
-                    raise ValueError(
+                    log.warning(
+                        f"Dataset {dataset_code}, subject {subject}, session {session}: "
                         f"Smallest class has {n_smallest_class} samples. "
                         f"Desired samples per class {ds} is too large."
                     )
+                    continue
                 indices.append(
                     np.concatenate(
                         [classwise_indices[cl][:ds] for cl in classwise_indices]
@@ -362,7 +364,9 @@ class WithinSessionEvaluation(BaseEvaluation):
                         y_train_all = y_sess[train_idx]
                         X_test = X_sess[test_idx]
                         y_test = y_sess[test_idx]
-                        data_size_steps = self.get_data_size_subsets(y_train_all)
+                        data_size_steps = self.get_data_size_subsets(
+                            y_train_all, dataset.code, subject, session
+                        )
                         for di, subset_indices in enumerate(data_size_steps):
                             if perm_i >= self.n_perms[di]:
                                 continue
