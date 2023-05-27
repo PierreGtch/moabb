@@ -299,6 +299,7 @@ class WithinSessionEvaluation(BaseEvaluation):
                         f"Smallest class has {n_smallest_class} samples. "
                         f"Desired samples per class {ds} is too large."
                     )
+                    indices.append(None)
                     continue
                 indices.append(
                     np.concatenate(
@@ -368,6 +369,8 @@ class WithinSessionEvaluation(BaseEvaluation):
                             y_train_all, dataset.code, subject, session
                         )
                         for di, subset_indices in enumerate(data_size_steps):
+                            if subset_indices is None:
+                                continue
                             if perm_i >= self.n_perms[di]:
                                 continue
                             not_enough_data = False
